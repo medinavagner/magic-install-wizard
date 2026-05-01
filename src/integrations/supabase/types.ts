@@ -14,7 +14,57 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      programs: {
+        Row: {
+          created_at: string
+          description: string | null
+          file_size_bytes: number | null
+          icon_url: string | null
+          id: string
+          installer_path: string
+          installer_type: string
+          name: string
+          publisher: string | null
+          silent_install_args: string
+          silent_uninstall_args: string
+          uninstall_registry_key: string | null
+          updated_at: string
+          version: string | null
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          file_size_bytes?: number | null
+          icon_url?: string | null
+          id?: string
+          installer_path: string
+          installer_type: string
+          name: string
+          publisher?: string | null
+          silent_install_args?: string
+          silent_uninstall_args?: string
+          uninstall_registry_key?: string | null
+          updated_at?: string
+          version?: string | null
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          file_size_bytes?: number | null
+          icon_url?: string | null
+          id?: string
+          installer_path?: string
+          installer_type?: string
+          name?: string
+          publisher?: string | null
+          silent_install_args?: string
+          silent_uninstall_args?: string
+          uninstall_registry_key?: string | null
+          updated_at?: string
+          version?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
