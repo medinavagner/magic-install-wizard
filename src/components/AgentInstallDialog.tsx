@@ -45,23 +45,33 @@ export const AgentInstallDialog = ({ open, onOpenChange }: Props) => {
             </ul>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Button asChild className="bg-gradient-to-r from-primary to-[hsl(var(--primary-glow))] text-primary-foreground">
-              <a href="/agent/deploy-console-agent.zip" download>
-                <Download className="mr-2 h-4 w-4" /> Baixar agente (.zip)
-              </a>
-            </Button>
-            <Button asChild variant="secondary">
-              <a href="/agent/install-agent.bat" download>
-                <Download className="mr-2 h-4 w-4" /> install-agent.bat
-              </a>
-            </Button>
-            <Button asChild variant="secondary">
-              <a href="/agent/deploy-agent.ps1" download>
-                <Download className="mr-2 h-4 w-4" /> deploy-agent.ps1
-              </a>
-            </Button>
-          </div>
+          {(() => {
+            const base = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/download-agent`;
+            return (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild className="bg-gradient-to-r from-primary to-[hsl(var(--primary-glow))] text-primary-foreground">
+                    <a href={`${base}?file=zip`} target="_blank" rel="noopener">
+                      <Download className="mr-2 h-4 w-4" /> Baixar agente (.zip)
+                    </a>
+                  </Button>
+                  <Button asChild variant="secondary">
+                    <a href={`${base}?file=bat`} target="_blank" rel="noopener">
+                      <Download className="mr-2 h-4 w-4" /> install-agent.bat
+                    </a>
+                  </Button>
+                  <Button asChild variant="secondary">
+                    <a href={`${base}?file=ps1`} target="_blank" rel="noopener">
+                      <Download className="mr-2 h-4 w-4" /> deploy-agent.ps1
+                    </a>
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  O download abre em nova aba. Se nada acontecer no preview, publique o projeto e baixe pela URL publicada.
+                </p>
+              </>
+            );
+          })()}
 
           <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-xs text-warning-foreground/90">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[hsl(var(--warning))]" />
