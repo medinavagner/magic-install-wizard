@@ -7,11 +7,12 @@ import { toast } from "sonner";
 
 interface Props {
   program: Program;
-  onEdit: (p: Program) => void;
-  onDeleted: () => void;
+  onEdit?: (p: Program) => void;
+  onDeleted?: () => void;
+  readOnly?: boolean;
 }
 
-export const ProgramCard = ({ program, onEdit, onDeleted }: Props) => {
+export const ProgramCard = ({ program, onEdit, onDeleted, readOnly = false }: Props) => {
   const installerUrl = supabase.storage
     .from("installers")
     .getPublicUrl(program.installer_path).data.publicUrl;
@@ -35,7 +36,7 @@ export const ProgramCard = ({ program, onEdit, onDeleted }: Props) => {
     await supabase.storage.from("installers").remove([program.installer_path]);
     const { error } = await supabase.from("programs").delete().eq("id", program.id);
     if (error) toast.error(error.message);
-    else { toast.success("Removido do catálogo"); onDeleted(); }
+    else { toast.success("Removido do catálogo"); onDeleted?.(); }
   };
 
   return (
@@ -77,14 +78,16 @@ export const ProgramCard = ({ program, onEdit, onDeleted }: Props) => {
         </Button>
       </div>
 
-      <div className="flex justify-end gap-1">
-        <Button size="sm" variant="ghost" onClick={() => onEdit(program)} className="h-7 text-xs text-muted-foreground">
-          <Pencil className="mr-1 h-3 w-3" /> Editar
-        </Button>
-        <Button size="sm" variant="ghost" onClick={handleDelete} className="h-7 text-xs text-destructive hover:text-destructive">
-          <Trash2 className="mr-1 h-3 w-3" /> Remover
-        </Button>
-      </div>
+      {!readOnly && (
+        <div className="flex justify-end gap-1">
+          <Button size="sm" variant="ghost" onClick={() => onEdit?.(program)} className="h-7 text-xs text-muted-foreground">
+            <Pencil className="mr-1 h-3 w-3" /> Editar
+          </Button>
+          <Button size="sm" variant="ghost" onClick={handleDelete} className="h-7 text-xs text-destructive hover:text-destructive">
+            <Trash2 className="mr-1 h-3 w-3" /> Remover
+          </Button>
+        </div>
+      )}
     </div>
   );
 };
