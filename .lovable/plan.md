@@ -1,51 +1,94 @@
-# Corrigir download do agente Windows
 
-## Causa
+# Área administrativa com login para o time de TI
 
-No ambiente de preview do Lovable, o proxy de fetch interfere no download de arquivos binários estáticos servidos a partir de `/agent/*` (especialmente `.zip` contendo `.bat`/`.ps1`). Resultado: o download falha **e** a sessão do iframe é quebrada, deslogando o usuário.
+## Objetivo
 
-O código atual está correto — o problema é exclusivo do preview. Na URL publicada já funcionaria, mas vamos resolver para funcionar nos dois ambientes.
+Hoje qualquer pessoa que abre o site pode cadastrar, editar e remover programas do catálogo. Vamos separar em duas áreas:
 
-## Solução
+- **Pública (`/`)** — catálogo somente leitura. Usuários finais continuam podendo clicar em **Instalar / Desinstalar** sem login (o agente local é quem executa).
+- **Administrativa (`/admin`)** — protegida por login. Apenas profissionais de TI cadastrados podem cadastrar programas, fazer upload de instaladores, editar, remover e baixar o agente Windows.
 
-Servir o agente através de uma **edge function** do Lovable Cloud. Edge functions não passam pelo proxy do preview e respondem com `Content-Disposition: attachment` direto do CDN do Supabase.
+## Modelo de acesso
 
-## Mudanças
+- Autenticação por **e-mail + senha** (sem Google, pois é uso interno de TI).
+- E-mails confirmados automaticamente (sem verificação por e-mail) para agilizar a criação de contas internas.
+- Papel `admin` controlado em tabela separada `user_roles` (padrão de segurança Lovable — nunca em `profiles`).
+- O **primeiro usuário** que se cadastrar vira admin automaticamente (bootstrap). Depois disso, novos cadastros entram como `pending` e precisam ser promovidos por um admin existente.
+- Admins existentes podem promover, despromover e remover outros usuários da tela de gerenciamento.
 
-### 1. Nova edge function `supabase/functions/download-agent/index.ts`
-- Pública (sem JWT), com CORS liberado.
-- `GET /functions/v1/download-agent?file=zip` → devolve o `deploy-console-agent.zip` montado on-the-fly com JSZip, contendo: `install-agent.bat`, `deploy-agent.ps1`, `uninstall-agent.bat`, `README.txt`.
-- `?file=ps1` | `?file=bat` | `?file=uninstall` | `?file=readme` → devolve cada arquivo individualmente como `text/plain` com `Content-Disposition: attachment`.
-- Os conteúdos dos scripts ficam embutidos como strings dentro da função (mesmos conteúdos atuais de `public/agent/`), então não há dependência do filesystem do frontend nem necessidade de upload prévio.
+## Mudanças no banco (migration)
 
-### 2. `src/components/AgentInstallDialog.tsx`
-- Construir a URL base da função: `${VITE_SUPABASE_URL}/functions/v1/download-agent`.
-- Trocar os 3 botões de download para apontar para essa URL com o `?file=` correspondente.
-- Adicionar `target="_blank" rel="noopener"` em cada `<a>` — isso evita que a navegação quebre a sessão do iframe do preview, mesmo no pior caso.
-- Adicionar uma nota discreta: *"O download abre em nova aba. Se estiver no preview e nada acontecer, publique o projeto e tente pela URL publicada."*
+1. Criar enum `app_role` com valores `admin`, `pending`.
+2. Criar tabela `user_roles (id, user_id → auth.users, role app_role, created_at)` com `unique(user_id, role)` e RLS habilitado.
+3. Criar função `has_role(_user_id uuid, _role app_role)` `SECURITY DEFINER` para evitar recursão de RLS.
+4. Criar tabela `profiles (id → auth.users, email, full_name, created_at)` para listar usuários na tela de gerenciamento.
+5. Trigger `on_auth_user_created` que:
+   - insere em `profiles`
+   - se for o **primeiro usuário** do sistema, insere `('admin')` em `user_roles`; senão insere `('pending')`.
+6. **Ajustar RLS de `programs`** (hoje totalmente pública para escrita):
+   - `SELECT`: continua público (catálogo aberto).
+   - `INSERT/UPDATE/DELETE`: somente quando `has_role(auth.uid(), 'admin')`.
+7. **Ajustar políticas do bucket `installers`**:
+   - `SELECT` público (o agente baixa o instalador).
+   - `INSERT/UPDATE/DELETE` somente para admins.
+8. RLS de `user_roles` e `profiles`: usuário lê o próprio registro; admins leem/escrevem todos.
 
-### 3. Manter `public/agent/*` como fallback
-Não removo os arquivos estáticos — eles continuam servindo como redundância para a URL publicada e como fonte de verdade para revisão de código.
+## Mudanças no frontend
 
-## Detalhes técnicos
+### Novas rotas (`src/App.tsx`)
+- `/` — catálogo público (refatorado).
+- `/auth` — tela de login/cadastro.
+- `/admin` — dashboard administrativo (protegido).
+- `/admin/users` — gerenciamento de usuários TI (protegido).
+
+### Novos arquivos
+- `src/hooks/useAuth.tsx` — provider com `session`, `user`, `isAdmin`, `loading`. Configura `onAuthStateChange` **antes** de `getSession()` (padrão Lovable).
+- `src/components/ProtectedRoute.tsx` — redireciona para `/auth` se não logado, mostra "Aguardando aprovação" se logado mas sem papel `admin`.
+- `src/pages/Auth.tsx` — formulário de login + cadastro com validação Zod (email, senha mín. 8 chars).
+- `src/pages/Admin.tsx` — versão atual de `Index.tsx` (catálogo + botões cadastrar/editar/remover/baixar agente) + header com nome do usuário e botão sair.
+- `src/pages/AdminUsers.tsx` — tabela de usuários (`profiles` + `user_roles`) com ações: aprovar (vira `admin`), revogar acesso, excluir.
+
+### Refatoração
+- `src/pages/Index.tsx` vira o **catálogo público**: mesma estética, mas sem botões de cadastrar/editar/remover/baixar agente. Apenas busca + cards com **Instalar** e **Desinstalar**. Link discreto "Área da TI" no header levando a `/auth`.
+- `ProgramCard` ganha prop `readOnly` para esconder os botões Editar/Remover na visualização pública.
+
+### Segurança em UI
+- Validação Zod em `/auth` e em `ProgramFormDialog`.
+- Mensagens de erro claras: "Credenciais inválidas", "Aguardando aprovação de um administrador", etc.
+- Sem armazenar papéis em `localStorage` — sempre validar via consulta a `user_roles`.
+
+## Fluxo de uso
 
 ```text
-ANTES                              DEPOIS
-Browser                            Browser
-   │                                  │
-   ▼ /agent/deploy-console-agent.zip  ▼ /functions/v1/download-agent?file=zip
-   │  (interceptado pelo proxy        │  (Supabase Edge — sem proxy)
-   │   do preview)                    │
-   ✗ falha + deslogout                ✓ ZIP gerado on-the-fly
+Usuário final (sem login)
+   └─> abre /  →  vê catálogo  →  clica Instalar  →  agente local executa
+
+Profissional de TI (primeira vez)
+   └─> /auth  →  Cadastrar  →  vira admin automaticamente (bootstrap)
+                                   ou  →  fica "pending", outro admin aprova em /admin/users
+
+Profissional de TI (já admin)
+   └─> /auth  →  Login  →  /admin  →  cadastra/edita/remove programas, baixa agente
+                                   →  /admin/users  →  aprova novos colegas
 ```
 
-- Runtime: Deno (edge function padrão do Supabase).
-- Dependência: `npm:jszip@3.10.1` para empacotar o ZIP em memória.
-- Resposta ZIP: `Content-Type: application/zip` + `Content-Disposition: attachment; filename="deploy-console-agent.zip"`.
-- Sem secrets adicionais — usa apenas o que já existe.
-- Sem mudanças no banco de dados.
-- Após deploy, valido com `curl` na função para garantir que o ZIP é retornado corretamente (cabeçalhos e tamanho).
+## Arquivos afetados
 
-## Resultado esperado
+**Novos:**
+- `supabase/migrations/<timestamp>_admin_auth.sql`
+- `src/hooks/useAuth.tsx`
+- `src/components/ProtectedRoute.tsx`
+- `src/pages/Auth.tsx`
+- `src/pages/Admin.tsx`
+- `src/pages/AdminUsers.tsx`
 
-Clicar em "Baixar agente (.zip)" no diálogo abre uma nova aba que dispara o download imediatamente, sem deslogar do Lovable, tanto no preview quanto na URL publicada.
+**Editados:**
+- `src/App.tsx` (rotas + AuthProvider)
+- `src/pages/Index.tsx` (vira catálogo público read-only)
+- `src/components/ProgramCard.tsx` (prop `readOnly`)
+
+## Fora do escopo desta entrega
+
+- Recuperação de senha por e-mail (pode ser adicionada depois).
+- Login social (Google/Apple) — não faz sentido para uso interno de TI.
+- Logs de auditoria de quem instalou/cadastrou o quê (pode virar próximo passo).
