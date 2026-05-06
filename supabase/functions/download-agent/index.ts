@@ -140,7 +140,7 @@ try {
         Download-File $url $tmp
 
         if ($ext -ieq '.msi') {
-            $msiArgs = "/i `"$tmp`" $args /L*v `"$LogDir\msi-last.log`""
+            $msiArgs = "/i ""$tmp"" $args /L*v ""$LogDir\msi-last.log"""
             $code = Run-Hidden 'msiexec.exe' $msiArgs
         } else {
             $code = Run-Hidden $tmp $args
