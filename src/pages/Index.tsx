@@ -4,7 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ProgramCard } from "@/components/ProgramCard";
-import { Search, TerminalSquare, PackageSearch, ShieldCheck } from "lucide-react";
+import { AgentInstallDialog } from "@/components/AgentInstallDialog";
+import { Search, TerminalSquare, PackageSearch, ShieldCheck, Download } from "lucide-react";
 import type { Program } from "@/lib/agent";
 
 const Index = () => {
