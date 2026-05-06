@@ -101,12 +101,31 @@ function Run-Hidden([string]$file, [string]$arguments) {
     return $p.ExitCode
 }
 
+function Download-File([string]$url, [string]$dest) {
+    Write-Log "DOWNLOAD: $url -> $dest"
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
+    try {
+        (New-Object System.Net.WebClient).DownloadFile($url, $dest)
+    } catch {
+        Write-Log "WebClient falhou ($($_.Exception.Message)), tentando BITS..."
+        try { Start-BitsTransfer -Source $url -Destination $dest -ErrorAction Stop }
+        catch { throw "Falha ao baixar instalador: $($_.Exception.Message)" }
+    }
+    if (-not (Test-Path $dest)) { throw "Arquivo baixado nao foi encontrado: $dest" }
+    $sz = (Get-Item $dest).Length
+    Write-Log "DOWNLOAD OK: $sz bytes"
+    if ($sz -lt 1024) { throw "Arquivo baixado parece invalido ($sz bytes)" }
+}
+
 try {
-    Write-Log "=== Invocado com URI: $Uri ==="
+    Write-Log "================================================="
+    Write-Log "Deploy Console Agent v$AgentVersion"
+    Write-Log "URI recebida: $Uri"
     $req = Parse-LvUri $Uri
     $action = $req.Action.ToLower()
     $params = $req.Params
     $name   = $params['name']
+    Write-Log "ACAO: $action  PROGRAMA: $name"
 
     if ($action -eq 'install') {
         $url  = $params['url']
@@ -118,19 +137,21 @@ try {
         if (-not $ext) { $ext = '.exe' }
         $tmp = Join-Path $env:TEMP ("dc-" + [Guid]::NewGuid().ToString('N') + $ext)
 
-        Write-Log "Baixando '$name' de $url -> $tmp"
-        try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
-        (New-Object System.Net.WebClient).DownloadFile($url, $tmp)
+        Download-File $url $tmp
 
         if ($ext -ieq '.msi') {
-            $msiArgs = "/i ""$tmp"" $args"
+            $msiArgs = "/i `"$tmp`" $args /L*v `"$LogDir\msi-last.log`""
             $code = Run-Hidden 'msiexec.exe' $msiArgs
         } else {
             $code = Run-Hidden $tmp $args
         }
 
         Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-        Write-Log "Instalacao de '$name' finalizada com codigo $code"
+        Write-Log "RESULTADO INSTALL '$name' -> codigo $code"
+        if ($code -eq 0) { Write-Log "SUCESSO" }
+        elseif ($code -eq 3010) { Write-Log "SUCESSO (reinicializacao necessaria)" }
+        elseif ($code -eq 1603) { Write-Log "ERRO MSI 1603 - falha generica. Verifique privilegios e logs." }
+        else { Write-Log "Codigo de saida nao zero" }
         exit $code
     }
     elseif ($action -eq 'uninstall') {
