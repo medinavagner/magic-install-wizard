@@ -34,6 +34,16 @@ export const AgentInstallDialog = ({ open, onOpenChange }: Props) => {
             </li>
           </ol>
 
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 text-xs">
+            <p className="mb-2 font-semibold text-foreground">Instalação permanente:</p>
+            <ul className="space-y-1 text-muted-foreground">
+              <li>→ Registrado para <strong>todos os usuários</strong> da máquina (HKLM).</li>
+              <li>→ <strong>Sobrevive a reinicializações</strong> — não roda em segundo plano, é acionado pelo navegador via protocolo.</li>
+              <li>→ Tarefa agendada de <strong>auto-reparo</strong> restaura o registro automaticamente se for removido.</li>
+              <li>→ Para <strong>atualizar</strong>: baixe o novo ZIP e rode <code className="font-mono text-primary">install-agent.bat</code> de novo como admin.</li>
+            </ul>
+          </div>
+
           <div className="rounded-lg border border-border bg-secondary/40 p-4 text-xs font-mono text-muted-foreground">
             <p className="mb-2 font-semibold text-foreground">O que o agente faz:</p>
             <ul className="space-y-1">
