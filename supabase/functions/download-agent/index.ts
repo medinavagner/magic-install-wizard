@@ -10,11 +10,12 @@ const corsHeaders = {
 };
 
 const PS1 = String.raw`# =====================================================================
-#  Deploy Console Agent - instalacao silenciosa de softwares no Windows
+#  Deploy Console Agent v2 - instalacao silenciosa de softwares no Windows
 #  Compativel: Windows 7 SP1 ou superior (PowerShell 2.0+)
 #  Invocacao: registrado como handler do protocolo lvinstall://
 # =====================================================================
 param([Parameter(Mandatory=$true)][string]$Uri)
+$AgentVersion = '2.0.0'
 
 $ErrorActionPreference = 'Stop'
 $LogDir  = Join-Path $env:ProgramData 'DeployConsoleAgent'
