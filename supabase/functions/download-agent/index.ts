@@ -192,50 +192,104 @@ catch {
 }
 `;
 
+const HEALTHCHECK_PS1 = String.raw`# Health-check do Deploy Console Agent
+# Verifica se arquivos e registro estao presentes; restaura se faltar.
+$ErrorActionPreference = 'SilentlyContinue'
+$InstallDir = Join-Path $env:ProgramData 'DeployConsoleAgent'
+$AgentPs1 = Join-Path $InstallDir 'deploy-agent.ps1'
+$LogFile = Join-Path $InstallDir 'healthcheck.log'
+function Log($m) { Add-Content $LogFile ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m) }
+
+if (-not (Test-Path $AgentPs1)) { Log "FALTA deploy-agent.ps1 - agente precisa ser reinstalado" }
+
+$cmd = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""$AgentPs1"" -Uri ""%1"""
+$roots = @('HKLM:\SOFTWARE\Classes\lvinstall', 'Registry::HKEY_CLASSES_ROOT\lvinstall')
+foreach ($root in $roots) {
+    if (-not (Test-Path $root)) {
+        Log "Restaurando chave: $root"
+        New-Item -Path $root -Force | Out-Null
+        Set-ItemProperty -Path $root -Name '(Default)' -Value 'URL:Deploy Console Install Protocol'
+        Set-ItemProperty -Path $root -Name 'URL Protocol' -Value ''
+        New-Item -Path "$root\shell\open\command" -Force | Out-Null
+        Set-ItemProperty -Path "$root\shell\open\command" -Name '(Default)' -Value $cmd
+    }
+}
+Log "Health-check OK"
+`;
+
 const INSTALL_BAT = `@echo off
 REM =====================================================================
 REM  Deploy Console Agent - Instalador / Registrador do protocolo
 REM  Execute como Administrador (botao direito -> Executar como admin)
+REM  Idempotente: pode rodar de novo para atualizar.
 REM =====================================================================
 setlocal
 
 set "INSTALL_DIR=%ProgramData%\\DeployConsoleAgent"
 set "AGENT_PS1=%INSTALL_DIR%\\deploy-agent.ps1"
+set "HEALTH_PS1=%INSTALL_DIR%\\healthcheck.ps1"
+set "VERSION_FILE=%INSTALL_DIR%\\version.txt"
 
 echo.
 echo === Deploy Console Agent ===
 echo Instalando em: %INSTALL_DIR%
 echo.
 
-if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-
-copy /Y "%~dp0deploy-agent.ps1" "%AGENT_PS1%" >nul
+net session >nul 2>&1
 if errorlevel 1 (
-    echo ERRO: nao consegui copiar deploy-agent.ps1
+    echo ERRO: este script precisa ser executado como ADMINISTRADOR.
+    echo Clique com o botao direito em install-agent.bat - Executar como administrador.
     pause
     exit /b 1
 )
+
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
+
+copy /Y "%~dp0deploy-agent.ps1" "%AGENT_PS1%" >nul
+copy /Y "%~dp0healthcheck.ps1" "%HEALTH_PS1%" >nul
+echo 2.1.0 > "%VERSION_FILE%"
+
+REM Permissoes: todos leem/executam, somente admins escrevem
+icacls "%INSTALL_DIR%" /inheritance:r >nul 2>&1
+icacls "%INSTALL_DIR%" /grant "*S-1-5-32-544:(OI)(CI)F" /grant "*S-1-5-32-545:(OI)(CI)RX" /grant "*S-1-5-18:(OI)(CI)F" >nul 2>&1
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "Try { Set-ExecutionPolicy -Scope LocalMachine -ExecutionPolicy RemoteSigned -Force } Catch {}"
 
-echo Registrando protocolo lvinstall:// ...
+echo Registrando protocolo lvinstall:// para todos os usuarios...
 
+set "PSCMD=powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"%AGENT_PS1%\\" -Uri \\"%%1\\""
+
+REM HKLM (todos os usuarios)
+reg add "HKLM\\SOFTWARE\\Classes\\lvinstall" /ve /t REG_SZ /d "URL:Deploy Console Install Protocol" /f >nul
+reg add "HKLM\\SOFTWARE\\Classes\\lvinstall" /v "URL Protocol" /t REG_SZ /d "" /f >nul
+reg add "HKLM\\SOFTWARE\\Classes\\lvinstall\\DefaultIcon" /ve /t REG_SZ /d "%SystemRoot%\\System32\\shell32.dll,12" /f >nul
+reg add "HKLM\\SOFTWARE\\Classes\\lvinstall\\shell\\open\\command" /ve /t REG_SZ /d "%PSCMD%" /f >nul
+
+REM HKCR (compatibilidade)
 reg add "HKCR\\lvinstall" /ve /t REG_SZ /d "URL:Deploy Console Install Protocol" /f >nul
 reg add "HKCR\\lvinstall" /v "URL Protocol" /t REG_SZ /d "" /f >nul
-reg add "HKCR\\lvinstall\\DefaultIcon" /ve /t REG_SZ /d "%SystemRoot%\\System32\\shell32.dll,12" /f >nul
-reg add "HKCR\\lvinstall\\shell" /f >nul
-reg add "HKCR\\lvinstall\\shell\\open" /f >nul
-reg add "HKCR\\lvinstall\\shell\\open\\command" /ve /t REG_SZ /d "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"%AGENT_PS1%\\" -Uri \\"%%1\\"" /f >nul
+reg add "HKCR\\lvinstall\\shell\\open\\command" /ve /t REG_SZ /d "%PSCMD%" /f >nul
 
 if errorlevel 1 (
-    echo ERRO: registro do protocolo falhou. Execute como Administrador.
+    echo ERRO: registro do protocolo falhou.
     pause
     exit /b 1
 )
 
+echo Registrando tarefa agendada de auto-reparo...
+schtasks /Delete /TN "DeployConsoleAgent-HealthCheck" /F >nul 2>&1
+schtasks /Create /TN "DeployConsoleAgent-HealthCheck" /SC ONLOGON /RL HIGHEST /RU "SYSTEM" ^
+    /TR "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"%HEALTH_PS1%\\"" /F >nul
+schtasks /Create /TN "DeployConsoleAgent-HealthCheckDaily" /SC DAILY /ST 09:00 /RL HIGHEST /RU "SYSTEM" ^
+    /TR "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"%HEALTH_PS1%\\"" /F >nul
+
 echo.
-echo OK! Agente instalado e protocolo lvinstall:// registrado.
+echo OK! Agente instalado permanentemente.
+echo - Registrado para todos os usuarios da maquina
+echo - Tarefa de auto-reparo ativa (logon e diario)
+echo - Sobrevive a reinicializacoes
+echo.
 echo Volte ao painel web e clique em "Instalar" em qualquer programa.
 echo.
 pause
@@ -245,6 +299,9 @@ endlocal
 const UNINSTALL_BAT = `@echo off
 REM Remove o agente Deploy Console e o protocolo lvinstall://
 REM Execute como Administrador.
+schtasks /Delete /TN "DeployConsoleAgent-HealthCheck" /F >nul 2>&1
+schtasks /Delete /TN "DeployConsoleAgent-HealthCheckDaily" /F >nul 2>&1
+reg delete "HKLM\\SOFTWARE\\Classes\\lvinstall" /f >nul 2>&1
 reg delete "HKCR\\lvinstall" /f >nul 2>&1
 rmdir /S /Q "%ProgramData%\\DeployConsoleAgent" 2>nul
 echo Agente removido.
