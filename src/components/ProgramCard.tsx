@@ -19,15 +19,18 @@ export const ProgramCard = ({ program, onEdit, onDeleted, readOnly = false }: Pr
 
   const handleInstall = () => {
     launchUri(buildInstallUri(program, installerUrl));
-    toast.success(`Instalando ${program.name} em segundo plano…`, {
-      description: "O agente Deploy Console está executando o instalador silenciosamente.",
+    toast.message(`Solicitação enviada ao agente: ${program.name}`, {
+      description:
+        "Se o navegador perguntar, autorize abrir o Deploy Console Agent. Se nada acontecer, instale o agente Windows e tente novamente. Logs em C:\\ProgramData\\DeployConsoleAgent\\agent.log.",
+      duration: 8000,
     });
   };
 
   const handleUninstall = () => {
     launchUri(buildUninstallUri(program));
-    toast.message(`Desinstalando ${program.name}…`, {
-      description: "Removendo silenciosamente sem prompts.",
+    toast.message(`Solicitação de desinstalação enviada: ${program.name}`, {
+      description: "O agente irá remover silenciosamente. Verifique o log do agente em caso de erro.",
+      duration: 6000,
     });
   };
 

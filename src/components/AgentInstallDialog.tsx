@@ -73,6 +73,17 @@ export const AgentInstallDialog = ({ open, onOpenChange }: Props) => {
             );
           })()}
 
+          <div className="rounded-lg border border-border bg-card/40 p-4 text-xs">
+            <p className="mb-2 font-semibold text-foreground">Não está instalando? Verifique:</p>
+            <ul className="space-y-1 text-muted-foreground">
+              <li>→ O agente foi instalado uma vez via <code className="font-mono text-primary">install-agent.bat</code> como administrador?</li>
+              <li>→ O navegador perguntou “Abrir Deploy Console Agent?” e você autorizou?</li>
+              <li>→ Logs em <code className="font-mono text-primary">C:\ProgramData\DeployConsoleAgent\agent.log</code></li>
+              <li>→ Códigos: <span className="font-mono">0</span> sucesso · <span className="font-mono">3010</span> sucesso (reiniciar) · <span className="font-mono">1603</span> erro MSI · outros: argumento silencioso pode estar incorreto.</li>
+              <li>→ Se atualizou o agente, rode novamente <code className="font-mono text-primary">install-agent.bat</code> como admin.</li>
+            </ul>
+          </div>
+
           <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-xs text-warning-foreground/90">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[hsl(var(--warning))]" />
             <p>

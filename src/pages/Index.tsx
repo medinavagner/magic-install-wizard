@@ -4,13 +4,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ProgramCard } from "@/components/ProgramCard";
-import { Search, TerminalSquare, PackageSearch, ShieldCheck } from "lucide-react";
+import { AgentInstallDialog } from "@/components/AgentInstallDialog";
+import { Search, TerminalSquare, PackageSearch, ShieldCheck, Download } from "lucide-react";
 import type { Program } from "@/lib/agent";
 
 const Index = () => {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [agentOpen, setAgentOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -33,15 +35,20 @@ const Index = () => {
             <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-primary">
               <TerminalSquare className="h-4 w-4" /> Deploy Console · Windows 7+
             </div>
-            <Button asChild variant="ghost" size="sm" className="text-xs">
-              <Link to="/auth"><ShieldCheck className="mr-1 h-3 w-3" /> Área da TI</Link>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button onClick={() => setAgentOpen(true)} variant="outline" size="sm" className="text-xs">
+                <Download className="mr-1 h-3 w-3" /> Baixar agente Windows
+              </Button>
+              <Button asChild variant="ghost" size="sm" className="text-xs">
+                <Link to="/auth"><ShieldCheck className="mr-1 h-3 w-3" /> Área da TI</Link>
+              </Button>
+            </div>
           </div>
           <h1 className="mt-4 max-w-3xl text-4xl font-bold leading-tight tracking-tight md:text-6xl">
             Instale softwares no Windows <span className="bg-gradient-to-r from-primary to-[hsl(var(--primary-glow))] bg-clip-text text-transparent">com um clique</span>, em silêncio.
           </h1>
           <p className="mt-4 max-w-2xl text-base text-muted-foreground md:text-lg">
-            Escolha um software do catálogo e clique em <span className="font-mono text-foreground">Instalar</span>. O agente local cuida do resto — sem prompts, sem cliques extras.
+            Antes de instalar pela primeira vez, baixe e execute o <span className="font-mono text-foreground">agente Windows</span>. Depois, escolha um software no catálogo e clique em <span className="font-mono text-foreground">Instalar</span>.
           </p>
         </div>
       </header>
@@ -80,6 +87,8 @@ const Index = () => {
       <footer className="border-t border-border py-6 text-center text-xs text-muted-foreground">
         Deploy Console — workflow de instalação silenciosa para Windows 7 ou superior.
       </footer>
+
+      <AgentInstallDialog open={agentOpen} onOpenChange={setAgentOpen} />
     </div>
   );
 };
