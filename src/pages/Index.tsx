@@ -87,6 +87,8 @@ const Index = () => {
       <footer className="border-t border-border py-6 text-center text-xs text-muted-foreground">
         Deploy Console — workflow de instalação silenciosa para Windows 7 ou superior.
       </footer>
+
+      <AgentInstallDialog open={agentOpen} onOpenChange={setAgentOpen} />
     </div>
   );
 };
