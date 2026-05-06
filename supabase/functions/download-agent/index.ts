@@ -371,6 +371,7 @@ Deno.serve(async (req) => {
         const zip = new JSZip();
         zip.file("install-agent.bat", INSTALL_BAT);
         zip.file("deploy-agent.ps1", PS1);
+        zip.file("healthcheck.ps1", HEALTHCHECK_PS1);
         zip.file("uninstall-agent.bat", UNINSTALL_BAT);
         zip.file("README.txt", README);
         const buf = await zip.generateAsync({ type: "uint8array" });
