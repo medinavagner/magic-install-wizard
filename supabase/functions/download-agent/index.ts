@@ -308,24 +308,25 @@ echo Agente removido.
 pause
 `;
 
-const README = `# Deploy Console Agent
+const README = `# Deploy Console Agent v2.1
 
-Pequeno agente para Windows 7 SP1 ou superior que instala softwares
-em segundo plano atraves do protocolo lvinstall://.
+Agente permanente para Windows 7 SP1 ou superior.
 
-## Conteudo do pacote
-- install-agent.bat    -> registra o protocolo (executar como admin, uma vez)
-- deploy-agent.ps1     -> executor que baixa e instala silenciosamente
+## Conteudo
+- install-agent.bat    -> registra (admin)
+- deploy-agent.ps1     -> executor
+- healthcheck.ps1      -> auto-reparo (tarefa agendada)
 - uninstall-agent.bat  -> remove tudo
 
-## Como usar
-1. Botao direito em install-agent.bat -> Executar como administrador.
-2. Volte ao painel web e clique em Instalar em qualquer programa.
-3. O navegador abrira o handler lvinstall:// que invoca o agente.
-4. O agente baixa o instalador para %TEMP%, executa silenciosamente e remove.
+## Persistencia
+- Registrado em HKLM (todos os usuarios)
+- Tarefa agendada DeployConsoleAgent-HealthCheck restaura registro se for removido
+- Sobrevive a reinicializacoes
+- Para atualizar: rode install-agent.bat de novo como admin
 
 ## Logs
 %ProgramData%\\DeployConsoleAgent\\agent.log
+%ProgramData%\\DeployConsoleAgent\\healthcheck.log
 
 ## Switches silenciosos comuns
 - MSI:           /qn /norestart
