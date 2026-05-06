@@ -12,6 +12,7 @@ const Index = () => {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [agentOpen, setAgentOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
