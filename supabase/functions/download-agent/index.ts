@@ -81,18 +81,19 @@ function Run-Hidden([string]$file, [string]$arguments) {
 }
 
 function Install-Program($p) {
-    $name = $p['name']
+    $name = [string]$p['name']
     $type = ([string]$p['installer_type']).ToLower()
-    $args = [string]$p['silent_install_args']
+    $silentArgs = [string]$p['silent_install_args']
     $url  = Public-Url ([string]$p['installer_path'])
     $ext  = if ($type) { ".$type" } else { '.exe' }
     $tmp  = Join-Path $env:TEMP ("dc-" + [Guid]::NewGuid().ToString('N') + $ext)
-    Write-Log "==> Instalando $name"
+    Write-Log "==> Instalando $name (args: $silentArgs)"
     Download-File $url $tmp
+    $safeName = ($name -replace '[^a-zA-Z0-9_\-]', '_')
     $code = if ($ext -ieq '.msi') {
-        Run-Hidden 'msiexec.exe' "/i \\"$tmp\\" $args /L*v \\"$LogDir\\msi-$name.log\\""
+        Run-Hidden 'msiexec.exe' "/i \\"$tmp\\" $silentArgs /L*v \\"$LogDir\\msi-$safeName.log\\""
     } else {
-        Run-Hidden $tmp $args
+        Run-Hidden $tmp $silentArgs
     }
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
     return $code
