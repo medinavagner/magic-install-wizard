@@ -48,8 +48,13 @@ const Index = () => {
             Instale softwares no Windows <span className="bg-gradient-to-r from-primary to-[hsl(var(--primary-glow))] bg-clip-text text-transparent">com um clique</span>, em silêncio.
           </h1>
           <p className="mt-4 max-w-2xl text-base text-muted-foreground md:text-lg">
-            Antes de instalar pela primeira vez, baixe e execute o <span className="font-mono text-foreground">agente Windows</span>. Depois, escolha um software no catálogo e clique em <span className="font-mono text-foreground">Instalar</span>.
+            Baixe o <span className="font-mono text-foreground">Deploy Console</span>, execute, marque os programas desejados e clique em instalar. Tudo em uma única janela.
           </p>
+          <div className="mt-6">
+            <Button onClick={() => setAgentOpen(true)} size="lg" className="bg-gradient-to-r from-primary to-[hsl(var(--primary-glow))] text-primary-foreground">
+              <Download className="mr-2 h-4 w-4" /> Baixar instalador Windows
+            </Button>
+          </div>
         </div>
       </header>
 
