@@ -1,43 +1,84 @@
-Esclarecimento e plano para tornar o agente permanente
 
-Situação atual
-- O agente já fica instalado de forma permanente: o `install-agent.bat` copia `deploy-agent.ps1` para `C:\ProgramData\DeployConsoleAgent\` e registra o protocolo `lvinstall://` no registro do Windows (`HKCR\lvinstall`).
-- Ele NÃO precisa ficar rodando em segundo plano: o Windows invoca o PowerShell automaticamente toda vez que o navegador chama um link `lvinstall://...`. É exatamente como Zoom, Teams, Spotify, Steam funcionam.
-- Portanto, depois de instalado uma vez (como administrador), o agente está sempre pronto para uso, mesmo após reiniciar a máquina.
+# Tutorial de Instalação On-Premise — Deploy Console
 
-O que vou melhorar para garantir que ele realmente fique sempre ativo
+Vou gerar um arquivo **PDF** (`/mnt/documents/deploy-console-on-premise.pdf`) contendo o passo a passo completo para subir o sistema em um servidor **Linux (Ubuntu/Debian)** usando **Supabase self-hosted** via Docker.
 
-1. Registro em escopo de máquina, não de usuário
-- Atualizar `install-agent.bat` para registrar o protocolo em `HKLM\SOFTWARE\Classes\lvinstall` (todos os usuários da máquina), além de `HKCR`. Isso garante que mesmo trocando de usuário Windows o agente continua funcionando.
+## Estrutura do documento
 
-2. Tarefa agendada de auto-reparo (Health Check)
-- Criar uma Tarefa Agendada do Windows chamada `DeployConsoleAgent-HealthCheck` que roda no logon e diariamente.
-- Ela executa um pequeno script que verifica:
-  - Se `deploy-agent.ps1` está em `C:\ProgramData\DeployConsoleAgent\`.
-  - Se as chaves de registro do protocolo `lvinstall://` ainda existem.
-- Se algo estiver faltando, ela restaura os arquivos e o registro automaticamente. Isso protege contra antivírus, limpadores de sistema ou usuários removendo por engano.
+1. **Visão geral da arquitetura**
+   - Diagrama: Servidor Linux → Supabase (Postgres + Auth + Storage + Edge Functions) + Frontend (Nginx) → Estações Windows com DeployConsole
+   - Portas, fluxo de dados, requisitos de rede interna
 
-3. Permissões corretas na pasta do agente
-- Definir permissões em `C:\ProgramData\DeployConsoleAgent\` para que qualquer usuário possa ler e executar, mas só administradores possam alterar. Evita que um usuário comum quebre o agente.
+2. **Pré-requisitos do servidor**
+   - Ubuntu 22.04 LTS (ou Debian 12), 4 vCPU, 8 GB RAM, 100 GB SSD
+   - Docker Engine + Docker Compose v2
+   - Git, Nginx, Certbot (TLS interno opcional)
+   - DNS interno apontando `deploy.suaempresa.local` para o servidor
 
-4. Indicador de versão
-- Salvar um arquivo `version.txt` na pasta do agente.
-- Adicionar no diálogo "Baixar agente Windows" do site uma observação clara: "Se você já instalou o agente antes, basta rodar `install-agent.bat` novamente como administrador para atualizar — todas as configurações são preservadas."
+3. **Instalação do Supabase self-hosted**
+   - `git clone https://github.com/supabase/supabase`
+   - Cópia de `docker/.env.example` → `.env` e configuração de:
+     - `POSTGRES_PASSWORD`, `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY`
+     - `SITE_URL`, `API_EXTERNAL_URL`, `SUPABASE_PUBLIC_URL`
+     - SMTP interno para e-mails de auth
+   - `docker compose up -d`
+   - Verificação do Studio em `http://servidor:8000`
 
-5. Atualizar o desinstalador
-- `uninstall-agent.bat` também removerá a Tarefa Agendada e as chaves em `HKLM`, para uma desinstalação limpa.
+4. **Aplicar o schema do Deploy Console**
+   - Script SQL com tudo que existe hoje:
+     - enum `app_role` (admin, pending, user)
+     - tabelas `profiles`, `programs`, `user_roles`
+     - funções `has_role`, `handle_new_user`, `tg_set_updated_at`
+     - políticas RLS de cada tabela
+     - trigger `on_auth_user_created` em `auth.users`
+   - Bucket público `installers` no Storage
 
-O que NÃO vou fazer (e por quê)
-- Não vou transformar o agente em um Serviço Windows que fica rodando 24/7. Não há necessidade — ele só precisa existir e estar registrado. Manter um serviço rodando consome memória sem benefício, já que o protocolo é o gatilho.
-- Não vou criar um ícone na bandeja do sistema. O agente é "invisível por design": o usuário só interage com ele via cliques no painel web.
+5. **Deploy da Edge Function `download-agent`**
+   - Instalar Supabase CLI
+   - `supabase link` apontando para a instância local
+   - `supabase functions deploy download-agent --no-verify-jwt`
+   - Teste com `curl`
 
-Resultado esperado
-- Após executar `install-agent.bat` uma vez como administrador:
-  - O agente fica registrado para todos os usuários da máquina.
-  - Sobrevive a reinicializações.
-  - Se algo apagar acidentalmente, a tarefa agendada restaura sozinha.
-  - Atualizações futuras são feitas só rodando o `install-agent.bat` novo, sem precisar desinstalar antes.
+6. **Build e publicação do frontend**
+   - Clonar o repositório do projeto
+   - Criar `.env` com `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_PROJECT_ID` apontando para o Supabase local
+   - `npm ci && npm run build`
+   - Servir `dist/` via Nginx (config completa no PDF, incluindo fallback SPA)
 
-Arquivos que vou alterar
-- `supabase/functions/download-agent/index.ts` — atualizar `INSTALL_BAT`, `UNINSTALL_BAT`, adicionar script de health-check no ZIP.
-- `src/components/AgentInstallDialog.tsx` — atualizar instruções e adicionar nota sobre atualização e persistência.
+7. **TLS e domínio interno**
+   - Opção A: certificado interno da empresa (CA corporativa)
+   - Opção B: Let's Encrypt via DNS-01 se houver domínio público
+   - Configuração de Nginx como reverse proxy para Supabase + frontend
+
+8. **Primeiro acesso e criação do admin**
+   - Cadastro pela tela `/auth` — primeiro usuário vira admin automaticamente (via `handle_new_user`)
+   - Aprovar usuários `pending` em `/admin/users`
+
+9. **Distribuição do DeployConsole para as estações**
+   - Como a URL embutida no instalador aponta para o Supabase local
+   - Compartilhamento via GPO, share de rede ou link direto
+
+10. **Operação e manutenção**
+    - Backup do volume Postgres (`pg_dump` agendado via cron)
+    - Backup do bucket `installers`
+    - Logs: `docker compose logs -f`
+    - Atualização do Supabase e do frontend
+    - Rotação de chaves JWT
+
+11. **Troubleshooting**
+    - CORS, e-mails de confirmação, RLS bloqueando insert, upload >50 MB no bucket, certificado autoassinado nas estações
+
+## Como vou gerar
+
+- Script Python com **ReportLab** (Platypus) — capa, sumário, headings, blocos de código com fundo cinza, tabelas de portas/variáveis
+- Tipografia: Helvetica (títulos) + Helvetica para corpo, código em Courier
+- QA obrigatório: converter PDF para imagens com `pdftoppm` e revisar página por página antes de entregar
+- Saída final: `<presentation-artifact>` apontando para `/mnt/documents/deploy-console-on-premise.pdf`
+
+## O que NÃO está no escopo (você escolheu apenas Self-host do Supabase)
+
+- Build/deploy do frontend será mencionado de forma resumida no item 6 (necessário para o sistema funcionar), mas o foco é o Supabase
+- Não cobrirei Windows Server nem distribuição via GPO em profundidade
+- Não cobrirei Edge Functions além da `download-agent` (única usada hoje)
+
+Confirma que posso gerar o PDF assim?
