@@ -111,6 +111,101 @@ function Install-Program($p) {
     return $code
 }
 
+function Find-UninstallEntry([string]$displayName, [string]$regKeyHint) {
+    $roots = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+    )
+    foreach ($root in $roots) {
+        if (-not (Test-Path $root)) { continue }
+        Get-ChildItem $root -ErrorAction SilentlyContinue | ForEach-Object {
+            try {
+                $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+                if (-not $props) { return }
+                $keyLeaf = Split-Path $_.PSPath -Leaf
+                $match = $false
+                if ($regKeyHint) {
+                    if ($keyLeaf -ieq $regKeyHint) { $match = $true }
+                    elseif ($props.DisplayName -and $props.DisplayName -ieq $regKeyHint) { $match = $true }
+                }
+                if (-not $match -and $displayName -and $props.DisplayName) {
+                    if ($props.DisplayName -ieq $displayName -or $props.DisplayName -like "*$displayName*") { $match = $true }
+                }
+                if ($match) {
+                    return [PSCustomObject]@{
+                        KeyLeaf = $keyLeaf
+                        DisplayName = $props.DisplayName
+                        UninstallString = $props.UninstallString
+                        QuietUninstallString = $props.QuietUninstallString
+                    } | Tee-Object -Variable found
+                }
+            } catch {}
+        }
+    }
+    return $null
+}
+
+function Uninstall-Program($p) {
+    $name = [string]$p['name']
+    $type = ([string]$p['installer_type']).ToLower()
+    $uArgs = [string]$p['silent_uninstall_args']
+    $regHint = [string]$p['uninstall_registry_key']
+    Write-Log "==> Desinstalando $name (hint: $regHint, args: $uArgs)"
+
+    # 1) Caminho rapido: GUID MSI explicito na chave de registro
+    if ($regHint -match '^\{[0-9A-Fa-f\-]+\}$') {
+        if ($uArgs -match '^\s*/S\s*$' -or -not $uArgs) { $uArgs = '/qn /norestart' }
+        $msiLog = Join-Path $LogDir ("uninst-" + ($name -replace '[^a-zA-Z0-9_\-]', '_') + ".log")
+        $args = "/x $regHint $uArgs /L*v \`"$msiLog\`""
+        return Run-Hidden 'msiexec.exe' $args
+    }
+
+    # 2) Busca no registro Uninstall
+    $entries = @()
+    $hits = Find-UninstallEntry $name $regHint
+    if ($hits) { $entries = @($hits) | Where-Object { $_ -ne $null } }
+    if ($entries.Count -eq 0) {
+        Write-Log "Nenhuma entrada de desinstalacao encontrada para $name"
+        return 1605
+    }
+    $entry = $entries[0]
+    Write-Log ("Match: {0} ({1})" -f $entry.DisplayName, $entry.KeyLeaf)
+
+    # MSI registrado -> usa /x {GUID}
+    if ($entry.KeyLeaf -match '^\{[0-9A-Fa-f\-]+\}$') {
+        if ($uArgs -match '^\s*/S\s*$' -or -not $uArgs) { $uArgs = '/qn /norestart' }
+        $msiLog = Join-Path $LogDir ("uninst-" + ($name -replace '[^a-zA-Z0-9_\-]', '_') + ".log")
+        $args = "/x $($entry.KeyLeaf) $uArgs /L*v \`"$msiLog\`""
+        return Run-Hidden 'msiexec.exe' $args
+    }
+
+    # EXE: prefere QuietUninstallString, senao UninstallString + args silenciosos cadastrados
+    $cmd = if ($entry.QuietUninstallString) { $entry.QuietUninstallString } else { $entry.UninstallString }
+    if (-not $cmd) { Write-Log "Sem UninstallString para $name"; return 1605 }
+
+    # Parse: pode vir "\"C:\path\unins.exe\" /flags" ou C:\path\unins.exe /flags
+    $exe = $null; $existingArgs = ''
+    if ($cmd.StartsWith('"')) {
+        $end = $cmd.IndexOf('"', 1)
+        if ($end -gt 0) {
+            $exe = $cmd.Substring(1, $end - 1)
+            $existingArgs = $cmd.Substring($end + 1).Trim()
+        }
+    } else {
+        $sp = $cmd.IndexOf(' ')
+        if ($sp -gt 0) {
+            $exe = $cmd.Substring(0, $sp)
+            $existingArgs = $cmd.Substring($sp + 1).Trim()
+        } else {
+            $exe = $cmd
+        }
+    }
+    $finalArgs = ($existingArgs + ' ' + $uArgs).Trim()
+    return Run-Hidden $exe $finalArgs
+}
+
+
 # ---------- GUI ----------
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'Deploy Console - Instalador'
@@ -127,7 +222,7 @@ $header.Anchor = 'Top,Left,Right'
 $form.Controls.Add($header)
 
 $sub = New-Object System.Windows.Forms.Label
-$sub.Text = 'Marque um ou mais e clique em Instalar selecionados.'
+$sub.Text = 'Marque os programas e use Instalar ou Desinstalar selecionados.'
 $sub.Location = New-Object System.Drawing.Point(16, 38)
 $sub.Size = New-Object System.Drawing.Size(680, 20)
 $sub.ForeColor = [System.Drawing.Color]::DimGray
@@ -170,6 +265,16 @@ $btnRefresh.Size = New-Object System.Drawing.Size(90, 32)
 $btnRefresh.Anchor = 'Bottom,Left'
 $form.Controls.Add($btnRefresh)
 
+$btnUninstall = New-Object System.Windows.Forms.Button
+$btnUninstall.Text = 'Desinstalar selecionados'
+$btnUninstall.Size = New-Object System.Drawing.Size(180, 32)
+$btnUninstall.Location = New-Object System.Drawing.Point(326, 460)
+$btnUninstall.Anchor = 'Bottom,Right'
+$btnUninstall.BackColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
+$btnUninstall.ForeColor = [System.Drawing.Color]::White
+$btnUninstall.FlatStyle = 'Flat'
+$form.Controls.Add($btnUninstall)
+
 $btnInstall = New-Object System.Windows.Forms.Button
 $btnInstall.Text = 'Instalar selecionados'
 $btnInstall.Size = New-Object System.Drawing.Size(180, 32)
@@ -211,7 +316,7 @@ $btnInstall.Add_Click({
         [System.Windows.Forms.MessageBox]::Show('Selecione ao menos um programa.', 'Deploy Console') | Out-Null
         return
     }
-    $btnInstall.Enabled = $false; $btnAll.Enabled = $false; $btnNone.Enabled = $false; $btnRefresh.Enabled = $false
+    $btnInstall.Enabled = $false; $btnUninstall.Enabled = $false; $btnAll.Enabled = $false; $btnNone.Enabled = $false; $btnRefresh.Enabled = $false
     $ok = 0; $fail = 0
     foreach ($p in $checked) {
         $status.Text = ("Instalando {0}..." -f $p['name'])
@@ -226,7 +331,42 @@ $btnInstall.Add_Click({
     }
     $status.Text = ("Concluido. Sucesso: {0}  Falhas: {1}" -f $ok, $fail)
     [System.Windows.Forms.MessageBox]::Show(("Instalacao concluida.\`nSucesso: {0}\`nFalhas: {1}\`n\`nLog: {2}" -f $ok, $fail, $LogFile), 'Deploy Console') | Out-Null
-    $btnInstall.Enabled = $true; $btnAll.Enabled = $true; $btnNone.Enabled = $true; $btnRefresh.Enabled = $true
+    $btnInstall.Enabled = $true; $btnUninstall.Enabled = $true; $btnAll.Enabled = $true; $btnNone.Enabled = $true; $btnRefresh.Enabled = $true
+})
+
+$btnUninstall.Add_Click({
+    $checked = @()
+    for ($i=0; $i -lt $list.Items.Count; $i++) {
+        if ($list.GetItemChecked($i)) { $checked += $script:Programs[$i] }
+    }
+    if ($checked.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show('Selecione ao menos um programa.', 'Deploy Console') | Out-Null
+        return
+    }
+    $names = ($checked | ForEach-Object { $_['name'] }) -join ", "
+    $confirm = [System.Windows.Forms.MessageBox]::Show(
+        ("Confirmar desinstalacao silenciosa de:\`n\`n{0}" -f $names),
+        'Deploy Console',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Warning)
+    if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+
+    $btnInstall.Enabled = $false; $btnUninstall.Enabled = $false; $btnAll.Enabled = $false; $btnNone.Enabled = $false; $btnRefresh.Enabled = $false
+    $ok = 0; $fail = 0
+    foreach ($p in $checked) {
+        $status.Text = ("Desinstalando {0}..." -f $p['name'])
+        $form.Refresh()
+        try {
+            $code = Uninstall-Program $p
+            if ($code -eq 0 -or $code -eq 3010) { $ok++ } else { $fail++ ; Write-Log "Desinst codigo nao zero para $($p['name']): $code" }
+        } catch {
+            $fail++
+            Write-Log ("ERRO desinstalando {0}: {1}" -f $p['name'], $_.Exception.Message)
+        }
+    }
+    $status.Text = ("Concluido. Sucesso: {0}  Falhas: {1}" -f $ok, $fail)
+    [System.Windows.Forms.MessageBox]::Show(("Desinstalacao concluida.\`nSucesso: {0}\`nFalhas: {1}\`n\`nLog: {2}" -f $ok, $fail, $LogFile), 'Deploy Console') | Out-Null
+    $btnInstall.Enabled = $true; $btnUninstall.Enabled = $true; $btnAll.Enabled = $true; $btnNone.Enabled = $true; $btnRefresh.Enabled = $true
 })
 
 $form.Add_Shown({ Load-List })
