@@ -184,7 +184,7 @@ function Uninstall-Program($p) {
     $cmd = if ($entry.QuietUninstallString) { $entry.QuietUninstallString } else { $entry.UninstallString }
     if (-not $cmd) { Write-Log "Sem UninstallString para $name"; return 1605 }
 
-    # Parse: pode vir "\"C:\path\unins.exe\" /flags" ou C:\path\unins.exe /flags
+    # Parse: pode vir com aspas envolvendo o caminho do executavel, seguido dos argumentos
     $exe = $null; $existingArgs = ''
     if ($cmd.StartsWith('"')) {
         $end = $cmd.IndexOf('"', 1)
