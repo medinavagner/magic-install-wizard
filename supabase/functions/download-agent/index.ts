@@ -67,16 +67,24 @@ function Download-File([string]$url, [string]$dest) {
 }
 
 function Run-Hidden([string]$file, [string]$arguments) {
-    Write-Log "EXEC: \\"$file\\" $arguments"
+    Write-Log "EXEC: [$file] $arguments"
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $file
     $psi.Arguments = $arguments
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $psi.WindowStyle = 'Hidden'
+    $psi.RedirectStandardError = $true
+    $psi.RedirectStandardOutput = $true
     $p = [System.Diagnostics.Process]::Start($psi)
+    $stdout = $p.StandardOutput.ReadToEnd()
+    $stderr = $p.StandardError.ReadToEnd()
     $p.WaitForExit()
     Write-Log "EXIT: $($p.ExitCode)"
+    if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) {
+        if ($stdout) { Write-Log "STDOUT: $stdout" }
+        if ($stderr) { Write-Log "STDERR: $stderr" }
+    }
     return $p.ExitCode
 }
 
@@ -91,7 +99,11 @@ function Install-Program($p) {
     Download-File $url $tmp
     $safeName = ($name -replace '[^a-zA-Z0-9_\-]', '_')
     $code = if ($ext -ieq '.msi') {
-        Run-Hidden 'msiexec.exe' "/i \\"$tmp\\" $silentArgs /L*v \\"$LogDir\\msi-$safeName.log\\""
+        # Normaliza args legados de EXE (/S) para o padrao MSI
+        if ($silentArgs -match '^\\s*/S\\s*$') { $silentArgs = '/qn /norestart' }
+        $msiLog = Join-Path $LogDir ("msi-" + $safeName + ".log")
+        $msiArgs = "/i \`"$tmp\`" $silentArgs /L*v \`"$msiLog\`""
+        Run-Hidden 'msiexec.exe' $msiArgs
     } else {
         Run-Hidden $tmp $silentArgs
     }
