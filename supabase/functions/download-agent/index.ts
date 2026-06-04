@@ -222,7 +222,7 @@ $header.Anchor = 'Top,Left,Right'
 $form.Controls.Add($header)
 
 $sub = New-Object System.Windows.Forms.Label
-$sub.Text = 'Marque um ou mais e clique em Instalar selecionados.'
+$sub.Text = 'Marque os programas e use Instalar ou Desinstalar selecionados.'
 $sub.Location = New-Object System.Drawing.Point(16, 38)
 $sub.Size = New-Object System.Drawing.Size(680, 20)
 $sub.ForeColor = [System.Drawing.Color]::DimGray
