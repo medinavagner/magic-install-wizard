@@ -265,6 +265,16 @@ $btnRefresh.Size = New-Object System.Drawing.Size(90, 32)
 $btnRefresh.Anchor = 'Bottom,Left'
 $form.Controls.Add($btnRefresh)
 
+$btnUninstall = New-Object System.Windows.Forms.Button
+$btnUninstall.Text = 'Desinstalar selecionados'
+$btnUninstall.Size = New-Object System.Drawing.Size(180, 32)
+$btnUninstall.Location = New-Object System.Drawing.Point(326, 460)
+$btnUninstall.Anchor = 'Bottom,Right'
+$btnUninstall.BackColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
+$btnUninstall.ForeColor = [System.Drawing.Color]::White
+$btnUninstall.FlatStyle = 'Flat'
+$form.Controls.Add($btnUninstall)
+
 $btnInstall = New-Object System.Windows.Forms.Button
 $btnInstall.Text = 'Instalar selecionados'
 $btnInstall.Size = New-Object System.Drawing.Size(180, 32)
