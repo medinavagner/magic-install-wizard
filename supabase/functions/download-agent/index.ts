@@ -316,7 +316,7 @@ $btnInstall.Add_Click({
         [System.Windows.Forms.MessageBox]::Show('Selecione ao menos um programa.', 'Deploy Console') | Out-Null
         return
     }
-    $btnInstall.Enabled = $false; $btnAll.Enabled = $false; $btnNone.Enabled = $false; $btnRefresh.Enabled = $false
+    $btnInstall.Enabled = $false; $btnUninstall.Enabled = $false; $btnAll.Enabled = $false; $btnNone.Enabled = $false; $btnRefresh.Enabled = $false
     $ok = 0; $fail = 0
     foreach ($p in $checked) {
         $status.Text = ("Instalando {0}..." -f $p['name'])
@@ -331,7 +331,42 @@ $btnInstall.Add_Click({
     }
     $status.Text = ("Concluido. Sucesso: {0}  Falhas: {1}" -f $ok, $fail)
     [System.Windows.Forms.MessageBox]::Show(("Instalacao concluida.\`nSucesso: {0}\`nFalhas: {1}\`n\`nLog: {2}" -f $ok, $fail, $LogFile), 'Deploy Console') | Out-Null
-    $btnInstall.Enabled = $true; $btnAll.Enabled = $true; $btnNone.Enabled = $true; $btnRefresh.Enabled = $true
+    $btnInstall.Enabled = $true; $btnUninstall.Enabled = $true; $btnAll.Enabled = $true; $btnNone.Enabled = $true; $btnRefresh.Enabled = $true
+})
+
+$btnUninstall.Add_Click({
+    $checked = @()
+    for ($i=0; $i -lt $list.Items.Count; $i++) {
+        if ($list.GetItemChecked($i)) { $checked += $script:Programs[$i] }
+    }
+    if ($checked.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show('Selecione ao menos um programa.', 'Deploy Console') | Out-Null
+        return
+    }
+    $names = ($checked | ForEach-Object { $_['name'] }) -join ", "
+    $confirm = [System.Windows.Forms.MessageBox]::Show(
+        ("Confirmar desinstalacao silenciosa de:\`n\`n{0}" -f $names),
+        'Deploy Console',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Warning)
+    if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+
+    $btnInstall.Enabled = $false; $btnUninstall.Enabled = $false; $btnAll.Enabled = $false; $btnNone.Enabled = $false; $btnRefresh.Enabled = $false
+    $ok = 0; $fail = 0
+    foreach ($p in $checked) {
+        $status.Text = ("Desinstalando {0}..." -f $p['name'])
+        $form.Refresh()
+        try {
+            $code = Uninstall-Program $p
+            if ($code -eq 0 -or $code -eq 3010) { $ok++ } else { $fail++ ; Write-Log "Desinst codigo nao zero para $($p['name']): $code" }
+        } catch {
+            $fail++
+            Write-Log ("ERRO desinstalando {0}: {1}" -f $p['name'], $_.Exception.Message)
+        }
+    }
+    $status.Text = ("Concluido. Sucesso: {0}  Falhas: {1}" -f $ok, $fail)
+    [System.Windows.Forms.MessageBox]::Show(("Desinstalacao concluida.\`nSucesso: {0}\`nFalhas: {1}\`n\`nLog: {2}" -f $ok, $fail, $LogFile), 'Deploy Console') | Out-Null
+    $btnInstall.Enabled = $true; $btnUninstall.Enabled = $true; $btnAll.Enabled = $true; $btnNone.Enabled = $true; $btnRefresh.Enabled = $true
 })
 
 $form.Add_Shown({ Load-List })
