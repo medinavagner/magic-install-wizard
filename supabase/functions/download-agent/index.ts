@@ -111,6 +111,101 @@ function Install-Program($p) {
     return $code
 }
 
+function Find-UninstallEntry([string]$displayName, [string]$regKeyHint) {
+    $roots = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+    )
+    foreach ($root in $roots) {
+        if (-not (Test-Path $root)) { continue }
+        Get-ChildItem $root -ErrorAction SilentlyContinue | ForEach-Object {
+            try {
+                $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+                if (-not $props) { return }
+                $keyLeaf = Split-Path $_.PSPath -Leaf
+                $match = $false
+                if ($regKeyHint) {
+                    if ($keyLeaf -ieq $regKeyHint) { $match = $true }
+                    elseif ($props.DisplayName -and $props.DisplayName -ieq $regKeyHint) { $match = $true }
+                }
+                if (-not $match -and $displayName -and $props.DisplayName) {
+                    if ($props.DisplayName -ieq $displayName -or $props.DisplayName -like "*$displayName*") { $match = $true }
+                }
+                if ($match) {
+                    return [PSCustomObject]@{
+                        KeyLeaf = $keyLeaf
+                        DisplayName = $props.DisplayName
+                        UninstallString = $props.UninstallString
+                        QuietUninstallString = $props.QuietUninstallString
+                    } | Tee-Object -Variable found
+                }
+            } catch {}
+        }
+    }
+    return $null
+}
+
+function Uninstall-Program($p) {
+    $name = [string]$p['name']
+    $type = ([string]$p['installer_type']).ToLower()
+    $uArgs = [string]$p['silent_uninstall_args']
+    $regHint = [string]$p['uninstall_registry_key']
+    Write-Log "==> Desinstalando $name (hint: $regHint, args: $uArgs)"
+
+    # 1) Caminho rapido: GUID MSI explicito na chave de registro
+    if ($regHint -match '^\{[0-9A-Fa-f\-]+\}$') {
+        if ($uArgs -match '^\s*/S\s*$' -or -not $uArgs) { $uArgs = '/qn /norestart' }
+        $msiLog = Join-Path $LogDir ("uninst-" + ($name -replace '[^a-zA-Z0-9_\-]', '_') + ".log")
+        $args = "/x $regHint $uArgs /L*v \`"$msiLog\`""
+        return Run-Hidden 'msiexec.exe' $args
+    }
+
+    # 2) Busca no registro Uninstall
+    $entries = @()
+    $hits = Find-UninstallEntry $name $regHint
+    if ($hits) { $entries = @($hits) | Where-Object { $_ -ne $null } }
+    if ($entries.Count -eq 0) {
+        Write-Log "Nenhuma entrada de desinstalacao encontrada para $name"
+        return 1605
+    }
+    $entry = $entries[0]
+    Write-Log ("Match: {0} ({1})" -f $entry.DisplayName, $entry.KeyLeaf)
+
+    # MSI registrado -> usa /x {GUID}
+    if ($entry.KeyLeaf -match '^\{[0-9A-Fa-f\-]+\}$') {
+        if ($uArgs -match '^\s*/S\s*$' -or -not $uArgs) { $uArgs = '/qn /norestart' }
+        $msiLog = Join-Path $LogDir ("uninst-" + ($name -replace '[^a-zA-Z0-9_\-]', '_') + ".log")
+        $args = "/x $($entry.KeyLeaf) $uArgs /L*v \`"$msiLog\`""
+        return Run-Hidden 'msiexec.exe' $args
+    }
+
+    # EXE: prefere QuietUninstallString, senao UninstallString + args silenciosos cadastrados
+    $cmd = if ($entry.QuietUninstallString) { $entry.QuietUninstallString } else { $entry.UninstallString }
+    if (-not $cmd) { Write-Log "Sem UninstallString para $name"; return 1605 }
+
+    # Parse: pode vir "\"C:\path\unins.exe\" /flags" ou C:\path\unins.exe /flags
+    $exe = $null; $existingArgs = ''
+    if ($cmd.StartsWith('"')) {
+        $end = $cmd.IndexOf('"', 1)
+        if ($end -gt 0) {
+            $exe = $cmd.Substring(1, $end - 1)
+            $existingArgs = $cmd.Substring($end + 1).Trim()
+        }
+    } else {
+        $sp = $cmd.IndexOf(' ')
+        if ($sp -gt 0) {
+            $exe = $cmd.Substring(0, $sp)
+            $existingArgs = $cmd.Substring($sp + 1).Trim()
+        } else {
+            $exe = $cmd
+        }
+    }
+    $finalArgs = ($existingArgs + ' ' + $uArgs).Trim()
+    return Run-Hidden $exe $finalArgs
+}
+
+
 # ---------- GUI ----------
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'Deploy Console - Instalador'
