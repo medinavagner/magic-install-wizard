@@ -230,6 +230,7 @@ function Uninstall-Program($p) {
     $msiGuid = $null
     if ($entry.KeyLeaf -match '^\\{[0-9A-Fa-f\\-]+\\}$') { $msiGuid = $entry.KeyLeaf }
     if (-not $msiGuid) { $msiGuid = Get-MsiGuidFromText $entry.UninstallString }
+    if (-not $msiGuid) { $msiGuid = Get-MsiGuidFromText $entry.QuietUninstallString }
     if ($msiGuid) {
         if ($uArgs -match '^\\s*/S\\s*$' -or -not $uArgs) { $uArgs = '/qn /norestart' }
         $msiLog = Join-Path $LogDir ("uninst-" + ($name -replace '[^a-zA-Z0-9_\-]', '_') + ".log")
@@ -406,7 +407,7 @@ $btnUninstall.Add_Click({
         $form.Refresh()
         try {
             $code = Uninstall-Program $p
-            if ($code -eq 0 -or $code -eq 3010) { $ok++ } else { $fail++ ; Write-Log "Desinst codigo nao zero para $($p['name']): $code" }
+            if ($code -eq 0 -or $code -eq 3010) { $ok++ } else { $fail++ ; if ($code -eq 1605) { $status.Text = ("Nao encontrado para desinstalar: {0}" -f $p['name']); $form.Refresh() } ; Write-Log "Desinst codigo nao zero para $($p['name']): $code" }
         } catch {
             $fail++
             Write-Log ("ERRO desinstalando {0}: {1}" -f $p['name'], $_.Exception.Message)
