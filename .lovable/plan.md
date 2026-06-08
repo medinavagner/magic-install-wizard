@@ -1,47 +1,19 @@
-# Fix: instalação silenciosa de .msi não executa
+Plano para corrigir o botão de desinstalação do agente:
 
-## Causa raiz
+1. Ajustar a busca no Registro do Windows
+- Corrigir `Find-UninstallEntry`, que hoje pode não devolver corretamente os resultados encontrados dentro do `ForEach-Object`.
+- Fazer a função retornar uma lista real de entradas candidatas para desinstalação.
 
-Na função `buildPs1` (arquivo `supabase/functions/download-agent/index.ts`), a chamada do `msiexec` usa `\"` para escapar aspas. PowerShell **não interpreta `\` como escape** — usa backtick `` ` ``. Com isso, o `msiexec` recebe uma linha de comando malformada (`/i \"C:\...\arquivo.msi\" ...`) e encerra imediatamente sem instalar. Por isso o `.msi` "baixa e nada acontece", enquanto `.exe` (que não usa quoting) funciona.
+2. Tornar a desinstalação mais confiável
+- Melhorar o tratamento de `QuietUninstallString` e `UninstallString`.
+- Detectar comandos MSI dentro do `UninstallString`, como `MsiExec.exe /I{GUID}` ou `/X{GUID}`, e convertê-los para desinstalação silenciosa com `msiexec /x {GUID} /qn /norestart`.
+- Preservar argumentos silenciosos cadastrados quando forem necessários para EXE.
 
-## Mudanças
+3. Melhorar retorno visual e diagnóstico
+- Exibir no status quando a entrada de desinstalação não for encontrada.
+- Registrar no log qual entrada foi encontrada, qual comando foi executado e o código de saída.
+- Atualizar o README do ZIP para mencionar o botão “Desinstalar selecionados” e o log.
 
-Arquivo único: `supabase/functions/download-agent/index.ts`, dentro do template `buildPs1`.
-
-### 1. Trocar escape de `\"` por backtick no PowerShell
-
-Linha atual (msiexec):
-```
-Run-Hidden 'msiexec.exe' "/i \"$tmp\" $silentArgs /L*v \"$LogDir\msi-$safeName.log\""
-```
-
-Passa a ser (no template literal JS, com `` \` `` para preservar o backtick):
-```js
-Run-Hidden 'msiexec.exe' "/i \`"$tmp\`" $silentArgs /L*v \`"$LogDir\\msi-$safeName.log\`""
-```
-
-Que produz no PS1 final:
-```
-Run-Hidden 'msiexec.exe' "/i `"$tmp`" $silentArgs /L*v `"$LogDir\msi-$safeName.log`""
-```
-
-### 2. Reforço defensivo em `Run-Hidden`
-
-Logar `ExitCode` formatado e capturar stdout/stderr para o log, ajuda diagnóstico futuro:
-- `$psi.RedirectStandardError = $true` (com `UseShellExecute=$false`)
-- Após `WaitForExit`, anexar `StandardError.ReadToEnd()` ao log quando ExitCode ≠ 0.
-
-### 3. (Opcional, sem risco) Normalizar args MSI
-
-Se `silent_install_args` para MSI estiver com `/S` (legado de EXE), forçar `/qn /norestart` em runtime, evitando erro 1639 do msiexec. Comparar `installer_type` == "msi" e `silentArgs -match '^/S\b'` → substituir por `/qn /norestart`.
-
-## Validação
-
-1. Redeploy automático da edge function (Lovable Cloud).
-2. Baixar o ZIP novamente pelo botão "Baixar DeployConsole" na home.
-3. Executar `DeployConsole.bat` (como admin), marcar um `.msi` e clicar Instalar.
-4. Conferir `%ProgramData%\DeployConsole\install.log` — deve mostrar `EXIT: 0` (ou 3010 para reboot pendente) e o log detalhado do MSI em `%ProgramData%\DeployConsole\msi-<nome>.log`.
-
-## Fora do escopo
-
-Não altera schema, RLS, frontend, nem o fluxo de upload de instaladores.
+4. Validar a função do agente
+- Fazer uma validação estática do arquivo gerado para garantir que o PS1 contenha o botão e o handler de desinstalação.
+- Depois da alteração, você deverá baixar novamente o ZIP do agente e testar com um programa instalado.
