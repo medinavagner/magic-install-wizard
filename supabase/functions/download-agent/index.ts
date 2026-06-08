@@ -445,7 +445,11 @@ const README = `Deploy Console - Instalador para Windows
 Como usar:
 1. Extraia o ZIP em qualquer pasta.
 2. Clique duas vezes em DeployConsole.bat (ou bot. direito > Executar como administrador).
-3. Marque os programas desejados e clique em "Instalar selecionados".
+3. Marque os programas desejados e clique em "Instalar selecionados" ou "Desinstalar selecionados".
+
+Desinstalacao:
+- Para MSI, o agente procura o GUID no registro e executa msiexec /x em modo silencioso.
+- Para EXE, usa QuietUninstallString quando existir; caso contrario usa UninstallString com os argumentos silenciosos cadastrados.
 
 Requisitos:
 - Windows 7 SP1 ou superior
