@@ -111,39 +111,95 @@ function Install-Program($p) {
     return $code
 }
 
+function New-UninstallEntry($root, $keyLeaf, $props, [int]$score) {
+    $obj = New-Object PSObject
+    $obj | Add-Member -MemberType NoteProperty -Name Root -Value $root
+    $obj | Add-Member -MemberType NoteProperty -Name KeyLeaf -Value $keyLeaf
+    $obj | Add-Member -MemberType NoteProperty -Name DisplayName -Value $props.DisplayName
+    $obj | Add-Member -MemberType NoteProperty -Name UninstallString -Value $props.UninstallString
+    $obj | Add-Member -MemberType NoteProperty -Name QuietUninstallString -Value $props.QuietUninstallString
+    $obj | Add-Member -MemberType NoteProperty -Name WindowsInstaller -Value $props.WindowsInstaller
+    $obj | Add-Member -MemberType NoteProperty -Name Score -Value $score
+    return $obj
+}
+
 function Find-UninstallEntry([string]$displayName, [string]$regKeyHint) {
     $roots = @(
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
         'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
     )
+    $matches = @()
+    $name = if ($displayName) { $displayName.Trim() } else { '' }
+    $hint = if ($regKeyHint) { $regKeyHint.Trim() } else { '' }
+
     foreach ($root in $roots) {
         if (-not (Test-Path $root)) { continue }
-        Get-ChildItem $root -ErrorAction SilentlyContinue | ForEach-Object {
+        foreach ($child in Get-ChildItem $root -ErrorAction SilentlyContinue) {
             try {
-                $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
-                if (-not $props) { return }
-                $keyLeaf = Split-Path $_.PSPath -Leaf
-                $match = $false
-                if ($regKeyHint) {
-                    if ($keyLeaf -ieq $regKeyHint) { $match = $true }
-                    elseif ($props.DisplayName -and $props.DisplayName -ieq $regKeyHint) { $match = $true }
+                $props = Get-ItemProperty $child.PSPath -ErrorAction SilentlyContinue
+                if (-not $props) { continue }
+                $keyLeaf = Split-Path $child.PSPath -Leaf
+                $score = 999
+
+                if ($hint) {
+                    if ($keyLeaf -ieq $hint) { $score = 0 }
+                    elseif ($props.DisplayName -and $props.DisplayName -ieq $hint) { $score = 1 }
+                    elseif ($props.DisplayName -and $props.DisplayName -like "*$hint*") { $score = 2 }
                 }
-                if (-not $match -and $displayName -and $props.DisplayName) {
-                    if ($props.DisplayName -ieq $displayName -or $props.DisplayName -like "*$displayName*") { $match = $true }
+                if ($score -eq 999 -and $name -and $props.DisplayName) {
+                    if ($props.DisplayName -ieq $name) { $score = 10 }
+                    elseif ($props.DisplayName -like "*$name*") { $score = 20 }
+                    elseif ($name -like "*$($props.DisplayName)*") { $score = 30 }
                 }
-                if ($match) {
-                    return [PSCustomObject]@{
-                        KeyLeaf = $keyLeaf
-                        DisplayName = $props.DisplayName
-                        UninstallString = $props.UninstallString
-                        QuietUninstallString = $props.QuietUninstallString
-                    } | Tee-Object -Variable found
-                }
-            } catch {}
+
+                if ($score -lt 999) { $matches += (New-UninstallEntry $root $keyLeaf $props $score) }
+            } catch {
+                Write-Log "Falha lendo chave de desinstalacao: $($_.Exception.Message)"
+            }
         }
     }
+
+    return @($matches | Sort-Object Score, DisplayName)
+}
+
+function Get-MsiGuidFromText([string]$text) {
+    if ($text -and $text -match '\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}') { return $matches[0] }
     return $null
+}
+
+function Split-UninstallCommand([string]$cmd) {
+    $obj = New-Object PSObject
+    $exe = $null; $args = ''
+    if ($cmd) { $cmd = $cmd.Trim() }
+    if (-not $cmd) {
+        $obj | Add-Member -MemberType NoteProperty -Name File -Value $null
+        $obj | Add-Member -MemberType NoteProperty -Name Args -Value ''
+        return $obj
+    }
+    if ($cmd.StartsWith('"')) {
+        $end = $cmd.IndexOf('"', 1)
+        if ($end -gt 0) {
+            $exe = $cmd.Substring(1, $end - 1)
+            $args = $cmd.Substring($end + 1).Trim()
+        }
+    }
+    if (-not $exe -and $cmd -match '^(.*?\.exe)\s*(.*)$') {
+        $exe = $matches[1].Trim()
+        $args = $matches[2].Trim()
+    }
+    if (-not $exe) {
+        $sp = $cmd.IndexOf(' ')
+        if ($sp -gt 0) {
+            $exe = $cmd.Substring(0, $sp)
+            $args = $cmd.Substring($sp + 1).Trim()
+        } else {
+            $exe = $cmd
+        }
+    }
+    $obj | Add-Member -MemberType NoteProperty -Name File -Value $exe
+    $obj | Add-Member -MemberType NoteProperty -Name Args -Value $args
+    return $obj
 }
 
 function Uninstall-Program($p) {
@@ -162,46 +218,38 @@ function Uninstall-Program($p) {
     }
 
     # 2) Busca no registro Uninstall
-    $entries = @()
-    $hits = Find-UninstallEntry $name $regHint
-    if ($hits) { $entries = @($hits) | Where-Object { $_ -ne $null } }
+    $entries = @(Find-UninstallEntry $name $regHint | Where-Object { $_ -ne $null })
     if ($entries.Count -eq 0) {
         Write-Log "Nenhuma entrada de desinstalacao encontrada para $name"
         return 1605
     }
     $entry = $entries[0]
-    Write-Log ("Match: {0} ({1})" -f $entry.DisplayName, $entry.KeyLeaf)
+    Write-Log ("Match: {0} ({1}) score={2}" -f $entry.DisplayName, $entry.KeyLeaf, $entry.Score)
 
-    # MSI registrado -> usa /x {GUID}
-    if ($entry.KeyLeaf -match '^\{[0-9A-Fa-f\-]+\}$') {
+    # MSI registrado ou UninstallString MSI -> usa /x {GUID}
+    $msiGuid = $null
+    if ($entry.KeyLeaf -match '^\{[0-9A-Fa-f\-]+\}$') { $msiGuid = $entry.KeyLeaf }
+    if (-not $msiGuid) { $msiGuid = Get-MsiGuidFromText $entry.UninstallString }
+    if ($msiGuid) {
         if ($uArgs -match '^\s*/S\s*$' -or -not $uArgs) { $uArgs = '/qn /norestart' }
         $msiLog = Join-Path $LogDir ("uninst-" + ($name -replace '[^a-zA-Z0-9_\-]', '_') + ".log")
-        $args = "/x $($entry.KeyLeaf) $uArgs /L*v \`"$msiLog\`""
+        $args = "/x $msiGuid $uArgs /L*v \`"$msiLog\`""
         return Run-Hidden 'msiexec.exe' $args
     }
 
     # EXE: prefere QuietUninstallString, senao UninstallString + args silenciosos cadastrados
     $cmd = if ($entry.QuietUninstallString) { $entry.QuietUninstallString } else { $entry.UninstallString }
     if (-not $cmd) { Write-Log "Sem UninstallString para $name"; return 1605 }
+    Write-Log "UninstallString usado: $cmd"
 
-    # Parse: pode vir com aspas envolvendo o caminho do executavel, seguido dos argumentos
-    $exe = $null; $existingArgs = ''
-    if ($cmd.StartsWith('"')) {
-        $end = $cmd.IndexOf('"', 1)
-        if ($end -gt 0) {
-            $exe = $cmd.Substring(1, $end - 1)
-            $existingArgs = $cmd.Substring($end + 1).Trim()
-        }
-    } else {
-        $sp = $cmd.IndexOf(' ')
-        if ($sp -gt 0) {
-            $exe = $cmd.Substring(0, $sp)
-            $existingArgs = $cmd.Substring($sp + 1).Trim()
-        } else {
-            $exe = $cmd
-        }
-    }
-    $finalArgs = ($existingArgs + ' ' + $uArgs).Trim()
+    $parts = Split-UninstallCommand $cmd
+    $exe = $parts.File
+    $existingArgs = $parts.Args
+    if (-not $exe) { Write-Log "Nao foi possivel interpretar UninstallString para $name"; return 1605 }
+
+    $finalArgs = $existingArgs
+    if (-not $entry.QuietUninstallString -and $uArgs) { $finalArgs = ($existingArgs + ' ' + $uArgs).Trim() }
+    Write-Log "Comando final desinstalacao: [$exe] $finalArgs"
     return Run-Hidden $exe $finalArgs
 }
 
