@@ -125,11 +125,11 @@ function New-UninstallEntry($root, $keyLeaf, $props, [int]$score) {
 
 function Find-UninstallEntry([string]$displayName, [string]$regKeyHint) {
     $roots = @(
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
-        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
-        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+        'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+        'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+        'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall'
     )
-    $matches = @()
+    $foundEntries = @()
     $name = if ($displayName) { $displayName.Trim() } else { '' }
     $hint = if ($regKeyHint) { $regKeyHint.Trim() } else { '' }
 
@@ -153,18 +153,18 @@ function Find-UninstallEntry([string]$displayName, [string]$regKeyHint) {
                     elseif ($name -like "*$($props.DisplayName)*") { $score = 30 }
                 }
 
-                if ($score -lt 999) { $matches += (New-UninstallEntry $root $keyLeaf $props $score) }
+                if ($score -lt 999) { $foundEntries += (New-UninstallEntry $root $keyLeaf $props $score) }
             } catch {
                 Write-Log "Falha lendo chave de desinstalacao: $($_.Exception.Message)"
             }
         }
     }
 
-    return @($matches | Sort-Object Score, DisplayName)
+    return @($foundEntries | Sort-Object Score, DisplayName)
 }
 
 function Get-MsiGuidFromText([string]$text) {
-    if ($text -and $text -match '\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}') { return $matches[0] }
+    if ($text -and $text -match '\\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\\}') { return $matches[0] }
     return $null
 }
 
@@ -184,7 +184,7 @@ function Split-UninstallCommand([string]$cmd) {
             $args = $cmd.Substring($end + 1).Trim()
         }
     }
-    if (-not $exe -and $cmd -match '^(.*?\.exe)\s*(.*)$') {
+    if (-not $exe -and $cmd -match '^(.*?\\.exe)\\s*(.*)$') {
         $exe = $matches[1].Trim()
         $args = $matches[2].Trim()
     }
@@ -210,8 +210,8 @@ function Uninstall-Program($p) {
     Write-Log "==> Desinstalando $name (hint: $regHint, args: $uArgs)"
 
     # 1) Caminho rapido: GUID MSI explicito na chave de registro
-    if ($regHint -match '^\{[0-9A-Fa-f\-]+\}$') {
-        if ($uArgs -match '^\s*/S\s*$' -or -not $uArgs) { $uArgs = '/qn /norestart' }
+    if ($regHint -match '^\\{[0-9A-Fa-f\\-]+\\}$') {
+        if ($uArgs -match '^\\s*/S\\s*$' -or -not $uArgs) { $uArgs = '/qn /norestart' }
         $msiLog = Join-Path $LogDir ("uninst-" + ($name -replace '[^a-zA-Z0-9_\-]', '_') + ".log")
         $args = "/x $regHint $uArgs /L*v \`"$msiLog\`""
         return Run-Hidden 'msiexec.exe' $args
@@ -228,10 +228,10 @@ function Uninstall-Program($p) {
 
     # MSI registrado ou UninstallString MSI -> usa /x {GUID}
     $msiGuid = $null
-    if ($entry.KeyLeaf -match '^\{[0-9A-Fa-f\-]+\}$') { $msiGuid = $entry.KeyLeaf }
+    if ($entry.KeyLeaf -match '^\\{[0-9A-Fa-f\\-]+\\}$') { $msiGuid = $entry.KeyLeaf }
     if (-not $msiGuid) { $msiGuid = Get-MsiGuidFromText $entry.UninstallString }
     if ($msiGuid) {
-        if ($uArgs -match '^\s*/S\s*$' -or -not $uArgs) { $uArgs = '/qn /norestart' }
+        if ($uArgs -match '^\\s*/S\\s*$' -or -not $uArgs) { $uArgs = '/qn /norestart' }
         $msiLog = Join-Path $LogDir ("uninst-" + ($name -replace '[^a-zA-Z0-9_\-]', '_') + ".log")
         $args = "/x $msiGuid $uArgs /L*v \`"$msiLog\`""
         return Run-Hidden 'msiexec.exe' $args
