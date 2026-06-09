@@ -1,0 +1,202 @@
+################################################################
+# Stack self-hosted: PostgreSQL + Supabase + Frontend + Nginx
+# Baseado no docker-compose oficial do Supabase (versão enxuta)
+################################################################
+name: deployconsole
+
+services:
+
+  # ---------- PostgreSQL ----------
+  db:
+    image: supabase/postgres:15.6.1.146
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: 3600
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
+    networks: [supa]
+
+  # ---------- Auth (GoTrue) ----------
+  auth:
+    image: supabase/gotrue:v2.158.1
+    depends_on:
+      db: { condition: service_healthy }
+    restart: unless-stopped
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${SUPABASE_PUBLIC_URL}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+      GOTRUE_SMTP_HOST: ${SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT}
+      GOTRUE_SMTP_USER: ${SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
+    networks: [supa]
+
+  # ---------- PostgREST (Data API) ----------
+  rest:
+    image: postgrest/postgrest:v12.2.0
+    depends_on:
+      db: { condition: service_healthy }
+    restart: unless-stopped
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      PGRST_DB_SCHEMAS: public,storage
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+    networks: [supa]
+
+  # ---------- Storage ----------
+  storage:
+    image: supabase/storage-api:v1.11.13
+    depends_on:
+      db: { condition: service_healthy }
+      rest: { condition: service_started }
+    restart: unless-stopped
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      FILE_SIZE_LIMIT: "5368709120"
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: local
+      GLOBAL_S3_BUCKET: stub
+    volumes:
+      - storage_data:/var/lib/storage
+    networks: [supa]
+
+  # ---------- Edge Functions (Deno) ----------
+  functions:
+    image: supabase/edge-runtime:v1.58.2
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_DB_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    volumes:
+      - ../supabase/functions:/home/deno/functions:ro
+    command:
+      - start
+      - --main-service
+      - /home/deno/functions
+    networks: [supa]
+
+  # ---------- Kong (API Gateway) ----------
+  kong:
+    image: kong:2.8.1
+    restart: unless-stopped
+    depends_on: [auth, rest, storage, functions]
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+    volumes:
+      - ./kong.yml:/var/lib/kong/kong.yml:ro
+    networks: [supa]
+
+  # ---------- Studio (painel admin opcional) ----------
+  studio:
+    image: supabase/studio:20240729-ce42139
+    restart: unless-stopped
+    depends_on: [kong]
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_ORGANIZATION_NAME: DeployConsole
+      DEFAULT_PROJECT_NAME: deployconsole
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+    networks: [supa]
+
+  meta:
+    image: supabase/postgres-meta:v0.84.2
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: ${POSTGRES_DB}
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+    networks: [supa]
+
+  # ---------- Frontend (React/Vite build estático) ----------
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
+        VITE_SUPABASE_PROJECT_ID: ${VITE_SUPABASE_PROJECT_ID}
+    restart: unless-stopped
+    networks: [supa]
+
+  # ---------- Nginx (reverse proxy + SSL) ----------
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on: [frontend, kong]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/app.conf.template:/etc/nginx/templates/app.conf.template:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    environment:
+      DOMAIN: ${DOMAIN}
+    networks: [supa]
+
+  certbot:
+    image: certbot/certbot:latest
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done;"
+
+volumes:
+  db_data:
+  storage_data:
+
+networks:
+  supa:
+    driver: bridge
