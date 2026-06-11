@@ -67,12 +67,8 @@ set -a; source .env; set +a
 echo "==> 5/6 Emitindo certificado SSL para ${DOMAIN}"
 mkdir -p ./certbot/conf ./certbot/www
 if [[ ! -d "./certbot/conf/live/${DOMAIN}" ]]; then
-  # sobe nginx mínimo só para o desafio ACME
-  docker run --rm -d --name nginx-acme -p 80:80 \
-    -v "$PWD/certbot/www:/var/www/certbot" \
-    -v "$PWD/nginx/acme.conf:/etc/nginx/conf.d/default.conf:ro" \
-    nginx:1.27-alpine || true
-
+  # cria config nginx ANTES de montar no container (senão o Docker cria um diretório)
+  mkdir -p nginx
   cat > nginx/acme.conf <<EOF
 server {
   listen 80; server_name ${DOMAIN};
@@ -80,9 +76,26 @@ server {
   location / { return 200 "ok"; }
 }
 EOF
-  docker restart nginx-acme >/dev/null || true
+
+  # garante que nada está ocupando a porta 80
+  docker rm -f nginx-acme >/dev/null 2>&1 || true
+
+  # sobe nginx mínimo só para o desafio ACME
+  docker run -d --name nginx-acme -p 80:80 \
+    -v "$PWD/certbot/www:/var/www/certbot" \
+    -v "$PWD/nginx/acme.conf:/etc/nginx/conf.d/default.conf:ro" \
+    nginx:1.27-alpine
 
   docker run --rm \
+    -v "$PWD/certbot/conf:/etc/letsencrypt" \
+    -v "$PWD/certbot/www:/var/www/certbot" \
+    certbot/certbot certonly --webroot -w /var/www/certbot \
+    --email "${LETSENCRYPT_EMAIL}" --agree-tos --no-eff-email \
+    -d "${DOMAIN}"
+
+  docker rm -f nginx-acme >/dev/null || true
+fi
+
     -v "$PWD/certbot/conf:/etc/letsencrypt" \
     -v "$PWD/certbot/www:/var/www/certbot" \
     certbot/certbot certonly --webroot -w /var/www/certbot \
