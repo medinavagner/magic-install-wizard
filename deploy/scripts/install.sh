@@ -64,6 +64,34 @@ fi
 # carrega DOMAIN/EMAIL
 set -a; source .env; set +a
 
+# valida que o usuário editou o .env
+if [[ "${DOMAIN}" == "app.seudominio.com.br" || -z "${DOMAIN}" ]]; then
+  echo "❌ DOMAIN ainda está com o valor de exemplo em deploy/.env"
+  echo "   Edite deploy/.env e defina DOMAIN, LETSENCRYPT_EMAIL, SUPABASE_PUBLIC_URL e SITE_URL"
+  exit 1
+fi
+if [[ "${LETSENCRYPT_EMAIL}" == "admin@seudominio.com.br" || -z "${LETSENCRYPT_EMAIL}" ]]; then
+  echo "❌ LETSENCRYPT_EMAIL ainda está com o valor de exemplo em deploy/.env"
+  exit 1
+fi
+
+# valida que o DNS do domínio aponta para este servidor
+echo "    Verificando DNS de ${DOMAIN}..."
+SERVER_IP="$(curl -fsS https://api.ipify.org || echo '')"
+DOMAIN_IP="$(getent hosts "${DOMAIN}" | awk '{print $1}' | head -n1 || true)"
+if [[ -z "${DOMAIN_IP}" ]]; then
+  echo "❌ O domínio ${DOMAIN} não resolve (NXDOMAIN)."
+  echo "   Crie um registro A em seu provedor de DNS:"
+  echo "     ${DOMAIN}  →  ${SERVER_IP}"
+  echo "   Aguarde a propagação (use: dig ${DOMAIN}) e rode novamente."
+  exit 1
+fi
+if [[ -n "${SERVER_IP}" && "${DOMAIN_IP}" != "${SERVER_IP}" ]]; then
+  echo "⚠️  ${DOMAIN} resolve para ${DOMAIN_IP}, mas este servidor é ${SERVER_IP}."
+  read -rp "    Continuar mesmo assim? (s/N) " ans
+  [[ "${ans,,}" == "s" ]] || exit 1
+fi
+
 echo "==> 5/6 Emitindo certificado SSL para ${DOMAIN}"
 mkdir -p ./certbot/conf ./certbot/www
 if [[ ! -d "./certbot/conf/live/${DOMAIN}" ]]; then
@@ -87,15 +115,6 @@ EOF
     nginx:1.27-alpine
 
   docker run --rm \
-    -v "$PWD/certbot/conf:/etc/letsencrypt" \
-    -v "$PWD/certbot/www:/var/www/certbot" \
-    certbot/certbot certonly --webroot -w /var/www/certbot \
-    --email "${LETSENCRYPT_EMAIL}" --agree-tos --no-eff-email \
-    -d "${DOMAIN}"
-
-  docker rm -f nginx-acme >/dev/null || true
-fi
-
     -v "$PWD/certbot/conf:/etc/letsencrypt" \
     -v "$PWD/certbot/www:/var/www/certbot" \
     certbot/certbot certonly --webroot -w /var/www/certbot \
