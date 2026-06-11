@@ -1,0 +1,30 @@
+################################################################
+# Override para uso em LOCALHOST (sem domínio, sem HTTPS).
+# Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+#
+# - Remove o serviço certbot
+# - Substitui o nginx público por um nginx simples na porta 8080
+#   que faz proxy de /auth /rest /storage /functions /realtime -> kong
+#   e o restante -> frontend
+################################################################
+name: deployconsole
+
+services:
+  # desativa o certbot (não faz sentido em localhost)
+  certbot:
+    profiles: ["disabled"]
+
+  # nginx simplificado HTTP-only
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on: [frontend, kong]
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/local.conf:/etc/nginx/conf.d/default.conf:ro
+    environment:
+      DOMAIN: localhost
+    # remove os mounts de SSL do compose principal
+    # (definidos novamente aqui para sobrescrever a lista)

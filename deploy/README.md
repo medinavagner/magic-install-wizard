@@ -28,6 +28,31 @@ Para enviar e-mails de confirmação e recuperação de senha. Pode ser:
 
 ---
 
+## 1b. Modo LOCALHOST (sem domínio / sem HTTPS)
+
+Para testar a stack na sua máquina (Linux, macOS ou WSL2) **sem domínio público**:
+
+Pré-requisitos: Docker + Node.js 18+ já instalados.
+
+```bash
+git clone https://github.com/SEU_USUARIO/SEU_REPO.git deployconsole
+cd deployconsole/deploy
+chmod +x scripts/*.sh
+./scripts/install-local.sh          # opcional: PORT=9000 ./scripts/install-local.sh
+```
+
+Acesse: **http://localhost:8080**
+
+Diferenças do modo produção:
+- Sem Nginx público / sem Certbot / sem SSL
+- Tudo escuta em `http://localhost:<PORT>` (padrão 8080)
+- `.env` gerado já com `SITE_URL`, `SUPABASE_PUBLIC_URL` e `VITE_SUPABASE_URL` apontando para localhost
+- Para parar: `docker compose -f docker-compose.yml -f docker-compose.local.yml down`
+
+> ⚠️ Não use o modo local em produção: cookies de auth, CORS e SMTP foram configurados para uso de desenvolvimento.
+
+---
+
 ## 2. Dependências instaladas automaticamente
 
 O script `scripts/install.sh` instala via `apt`:
