@@ -46,7 +46,7 @@ if [[ ! -f .env ]]; then
   sed -i "s|TROQUE_ESTA_SENHA$|${DASH_PASS}|g" .env
 
   echo "    -> gerando ANON_KEY e SERVICE_ROLE_KEY"
-  KEYS="$(JWT_SECRET="$JWT_SECRET" node "$SCRIPT_DIR/gen-jwt.js")"
+  KEYS="$(JWT_SECRET="$JWT_SECRET" node "$SCRIPT_DIR/gen-jwt.cjs")"
   ANON="$(echo "$KEYS"    | grep ^ANON_KEY=         | cut -d= -f2-)"
   SERVICE="$(echo "$KEYS" | grep ^SERVICE_ROLE_KEY= | cut -d= -f2-)"
   sed -i "s|COLE_AQUI_O_TOKEN_ANON_GERADO|${ANON}|g" .env
